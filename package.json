@@ -1,0 +1,21 @@
+{
+  "name": "traitor-radar",
+  "version": "1.0.0",
+  "description": "An automated Telegram loyalty tracker using Cloudflare Workers & D1",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init:local": "wrangler d1 execute traitor-db --local --file=./schema.sql",
+    "db:init:remote": "wrangler d1 execute traitor-db --remote --file=./schema.sql",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "grammy": "^1.46.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^3.114.17"
+  }
+}

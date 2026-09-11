@@ -1,0 +1,13 @@
+name = "traitor-radar"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# Cloudflare D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "traitor-db"
+database_id = "your-d1-database-id" # Updated after running `wrangler d1 create traitor-db`
+
+[vars]
+ADMIN_ID = "96092687"
+# BOT_TOKEN and SECRET_TOKEN should be set via `wrangler secret put` or .dev.vars for local dev
