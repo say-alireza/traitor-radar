@@ -159,7 +159,7 @@ export function createBot(env: Env) {
       const username = m.username ? `@${m.username}` : 'no-username';
       const channel = m.channel_link || m.bio_link || (lang === 'fa' ? 'بدون لینک' : 'No link');
       const statusLabel = m.status === 'deleted_account'
-        ? (lang === 'fa' ? '[اکانت حذف شده]' : '[DELETED ACCOUNT]')
+        ? (lang === 'fa' ? '[اکانت حذفشده]' : '[DELETED ACCOUNT]')
         : (lang === 'fa' ? '[خروج]' : '[LEFT]');
       return `${idx + 1}. ${name} (${username}) ${statusLabel} [ID: ${m.user_id}]\n   Channel: ${channel}\n   Time: ${m.left_at}`;
     });

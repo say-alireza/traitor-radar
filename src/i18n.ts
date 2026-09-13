@@ -7,7 +7,7 @@ export const messages = {
     help_text:
       `راهنمای استفاده از رادار:\n\n` +
       `۱. افزودن ربات به کانال:\n` +
-      `ربات را به عنوان ادمین به کانال روزمرگی خود اد کنید. کانال به صورت خودکار به اکانت شما متصل میشود.\n\n` +
+      `ربات را به عنوان ادمین به کانال روزمرگی خود اد کنید. کانال بهصورت خودکار به اکانت شما متصل میشود.\n\n` +
       `۲. نحوه عملکرد:\n` +
       `- هنگام عضویت فرد: ربات کانال متصل به پروفایل یا لینک بیو را ثبت میکند.\n` +
       `- هنگام لفت دادن یا حذف اکانت: ربات با ارسال دکمه مستقیم کانال او، به شما هشدار میدهد.\n\n` +
@@ -25,13 +25,13 @@ export const messages = {
     btn_language: '🌐 زبان / Language',
     btn_open_channel: '🔗 ورود به کانال',
     btn_leave_channel: '🚪 خروج از کانال',
-    info_prompt: 'برای استعلام کاربر، دستور را به شکل زیر بفرستید:\n/info 123456789',
+    info_prompt: 'برای استعلام کاربر، شناسه عددی او را بفرستید:\n/info 123456789',
     pair_prompt: 'برای اتصال دستی کانال به کاربر، دستور را به این شکل بفرستید:\n/pair 123456789 https://t.me/channel',
     no_channels: 'هنوز کانالی به ربات متصل نشده است. ربات را به عنوان ادمین به کانال خود اد کنید.',
     no_active_members: 'هیچ عضو فعالی در دیتابیس ثبت نشده است.',
     no_departures: 'هیچ خروجی اخیری ثبت نشده است.',
     channel_connected: (title: string, id: number) =>
-      `کانال با موفقیت متصل شد.\nعنوان: ${title}\nشناسه: ${id}\n\nاز این لحظه ورود و خروج اعضا به شما گزارش داده میشود.`,
+      `کانال با موفقیت متصل شد.\nعنوان: ${title}\nشناسه: ${id}\n\nاز این لحظه ورود، خروج و اکانتهای دیلیتشده به شما گزارش داده میشود.`,
     member_joined: (channel: string, name: string, username: string, id: number, targetChannel?: string) =>
       `عضویت جدید [${channel}]:\nنام: ${name}\nیوزرنیم: @${username}\nشناسه: ${id}\n` +
       (targetChannel ? `کانال متصل: ${targetChannel}` : 'کانال متصل: یافت نشد (قابل ثبت با /pair)'),
@@ -39,7 +39,7 @@ export const messages = {
       `هشدار خروج [${channel}]:\nنام: ${name}\nیوزرنیم: @${username}\nشناسه: ${id}\nکانال: ${targetChannel}` +
       (pastNames ? `\nنامهای پیشین: ${pastNames}` : ''),
     account_deleted: (channel: string, id: number, targetChannel: string, pastNames?: string) =>
-      `هشدار حذف اکانت [${channel}]:\nوضعیت: اکانت دیلیت شده\nشناسه: ${id}\nکانال متصل: ${targetChannel}` +
+      `هشدار حذف اکانت [${channel}]:\nوضعیت: اکانت دیلیتشده\nشناسه: ${id}\nکانال متصل: ${targetChannel}` +
       (pastNames ? `\nنامهای پیشین: ${pastNames}` : ''),
   },
   en: {
