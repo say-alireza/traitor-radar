@@ -90,8 +90,10 @@ export class MemberDatabase {
     bio: string | null;
     channelLink: string | null;
     channelTitle: string | null;
+    bioLink: string | null;
     autoDetected: boolean;
-    status: 'member' | 'left' | 'kicked';
+    isDeleted?: boolean;
+    status: 'member' | 'left' | 'kicked' | 'deleted_account';
   }): Promise<{ isNew: boolean; changed: boolean }> {
     const existing = await this.getMember(data.channelId, data.userId);
 
@@ -100,9 +102,9 @@ export class MemberDatabase {
         .prepare(
           `INSERT INTO members (
             channel_id, user_id, first_name, last_name, username, bio, 
-            channel_link, channel_title, status, auto_detected, 
+            channel_link, channel_title, bio_link, status, auto_detected, is_deleted,
             joined_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
         )
         .bind(
           data.channelId,
@@ -113,8 +115,10 @@ export class MemberDatabase {
           data.bio,
           data.channelLink,
           data.channelTitle,
+          data.bioLink,
           data.status,
-          data.autoDetected ? 1 : 0
+          data.autoDetected ? 1 : 0,
+          data.isDeleted ? 1 : 0
         )
         .run();
 
@@ -145,8 +149,10 @@ export class MemberDatabase {
       );
     }
 
+    // Preserve previously stored channel links if new one is not available
     const finalChannelLink = data.channelLink || existing.channel_link;
     const finalChannelTitle = data.channelTitle || existing.channel_title;
+    const finalBioLink = data.bioLink || existing.bio_link;
     const finalBio = data.bio ?? existing.bio;
 
     await this.db
@@ -158,8 +164,10 @@ export class MemberDatabase {
           bio = ?,
           channel_link = ?,
           channel_title = ?,
+          bio_link = ?,
           status = ?,
           auto_detected = CASE WHEN ? IS NOT NULL THEN 1 ELSE auto_detected END,
+          is_deleted = CASE WHEN ? = 1 THEN 1 ELSE is_deleted END,
           left_at = CASE WHEN ? = 'member' THEN NULL ELSE left_at END,
           updated_at = datetime('now')
         WHERE channel_id = ? AND user_id = ?`
@@ -171,8 +179,10 @@ export class MemberDatabase {
         finalBio,
         finalChannelLink,
         finalChannelTitle,
+        finalBioLink,
         data.status,
         data.channelLink,
+        data.isDeleted ? 1 : 0,
         data.status,
         data.channelId,
         data.userId
@@ -182,20 +192,23 @@ export class MemberDatabase {
     return { isNew: false, changed: hasProfileChanged };
   }
 
-  async markLeft(
+  async markLeftOrDeleted(
     channelId: number,
     userId: number,
     firstName?: string,
     lastName?: string,
-    username?: string
+    username?: string,
+    isDeletedAccount = false
   ): Promise<MemberRecord | null> {
     const existing = await this.getMember(channelId, userId);
+    const newStatus = isDeletedAccount ? 'deleted_account' : 'left';
 
     if (existing) {
       await this.db
         .prepare(
           `UPDATE members SET 
-            status = 'left',
+            status = ?,
+            is_deleted = CASE WHEN ? = 1 THEN 1 ELSE is_deleted END,
             first_name = COALESCE(?, first_name),
             last_name = COALESCE(?, last_name),
             username = COALESCE(?, username),
@@ -203,7 +216,15 @@ export class MemberDatabase {
             updated_at = datetime('now')
           WHERE channel_id = ? AND user_id = ?`
         )
-        .bind(firstName || null, lastName || null, username || null, channelId, userId)
+        .bind(
+          newStatus,
+          isDeletedAccount ? 1 : 0,
+          firstName || null,
+          lastName || null,
+          username || null,
+          channelId,
+          userId
+        )
         .run();
 
       if (firstName || username) {
@@ -253,12 +274,12 @@ export class MemberDatabase {
     return true;
   }
 
-  async getRecentLeftByOwner(ownerId: number, limit = 15): Promise<MemberRecord[]> {
+  async getRecentDeparturesByOwner(ownerId: number, limit = 15): Promise<MemberRecord[]> {
     const { results } = await this.db
       .prepare(
         `SELECT m.* FROM members m
          JOIN channels c ON m.channel_id = c.channel_id
-         WHERE c.owner_id = ? AND m.status = 'left'
+         WHERE c.owner_id = ? AND (m.status = 'left' OR m.status = 'deleted_account')
          ORDER BY m.left_at DESC LIMIT ?`
       )
       .bind(ownerId, limit)

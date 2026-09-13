@@ -1,4 +1,4 @@
--- Channels table: maps each channel to its owner (the admin who added the bot)
+-- Channels table: maps each channel to its owner
 CREATE TABLE IF NOT EXISTS channels (
     channel_id INTEGER PRIMARY KEY,
     owner_id INTEGER NOT NULL,
@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS channels (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
--- Members table: tracks members per channel
+-- Members table: tracks members per channel with full snapshot fields
 CREATE TABLE IF NOT EXISTS members (
     channel_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
@@ -16,10 +16,12 @@ CREATE TABLE IF NOT EXISTS members (
     last_name TEXT,
     username TEXT,
     bio TEXT,
-    channel_link TEXT,
+    channel_link TEXT,           -- Best resolved link (personal_chat or bio)
     channel_title TEXT,
-    status TEXT DEFAULT 'member',
+    bio_link TEXT,               -- Stored private/invite link from bio
+    status TEXT DEFAULT 'member', -- member, left, kicked, deleted_account
     auto_detected INTEGER DEFAULT 0,
+    is_deleted INTEGER DEFAULT 0,
     joined_at TEXT DEFAULT (datetime('now')),
     left_at TEXT,
     updated_at TEXT DEFAULT (datetime('now')),
@@ -38,7 +40,7 @@ CREATE TABLE IF NOT EXISTS profile_history (
     recorded_at TEXT DEFAULT (datetime('now'))
 );
 
--- Indexes for performance
+-- Indexes for fast query execution
 CREATE INDEX IF NOT EXISTS idx_channels_owner_id ON channels(owner_id);
 CREATE INDEX IF NOT EXISTS idx_members_user_id ON members(user_id);
 CREATE INDEX IF NOT EXISTS idx_members_status ON members(status);

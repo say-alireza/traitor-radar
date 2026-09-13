@@ -1,17 +1,32 @@
-import { Bot } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 import { Env } from './types';
 import { MemberDatabase } from './db';
 
 function extractChannelFromBio(bio?: string): { link: string; type: string } | null {
   if (!bio) return null;
 
-  const linkMatch = bio.match(/(?:https?:\/\/)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_+]+)/i);
-  if (linkMatch) {
-    const raw = linkMatch[0];
-    const fullLink = raw.startsWith('http') ? raw : `https://${raw}`;
-    return { link: fullLink, type: 'bio_link' };
+  // 1. Private invite link (modern: t.me/+...)
+  const privateMatch = bio.match(/(?:https?:\/\/)?(?:t\.me|telegram\.me)\/\+([a-zA-Z0-9_-]+)/i);
+  if (privateMatch) {
+    const raw = privateMatch[0];
+    return { link: raw.startsWith('http') ? raw : `https://${raw}`, type: 'private_invite' };
   }
 
+  // 2. Legacy private invite link (t.me/joinchat/...)
+  const legacyMatch = bio.match(/(?:https?:\/\/)?(?:t\.me|telegram\.me)\/joinchat\/([a-zA-Z0-9_-]+)/i);
+  if (legacyMatch) {
+    const raw = legacyMatch[0];
+    return { link: raw.startsWith('http') ? raw : `https://${raw}`, type: 'legacy_invite' };
+  }
+
+  // 3. Public channel URL (t.me/channel_name)
+  const publicMatch = bio.match(/(?:https?:\/\/)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_]{4,})/i);
+  if (publicMatch) {
+    const raw = publicMatch[0];
+    return { link: raw.startsWith('http') ? raw : `https://${raw}`, type: 'public_link' };
+  }
+
+  // 4. Handle in bio (@channel_name)
   const atMatch = bio.match(/@([a-zA-Z0-9_]{4,})/);
   if (atMatch) {
     return { link: `https://t.me/${atMatch[1]}`, type: 'bio_handle' };
@@ -36,19 +51,19 @@ export function createBot(env: Env) {
     const text = [
       'Traitor Radar is active.',
       '',
-      'How to use:',
-      '1. Add this bot as an Administrator to your Telegram channel.',
-      '2. The bot will automatically link your channel to your account.',
-      '3. You will receive instant alerts when someone joins or leaves.',
+      'Features:',
+      '- Automatic public profile channel detection',
+      '- Bio private invite link snapshotting',
+      '- Stealth departure & deleted account tracking',
       '',
-      'Your Connected Channels:',
+      'Connected Channels:',
       channelList,
       '',
       'Commands:',
       '/pair <user_id> <channel_link> - Manually link a channel to a user ID',
-      '/info <user_id> - View detailed user history',
-      '/left - List recent members who left your channels',
-      '/list - List active members in your channels',
+      '/info <user_id> - View detailed history & linked channel',
+      '/left - List recent departures and ghost accounts',
+      '/list - List active members',
     ].join('\n');
 
     await ctx.reply(text);
@@ -72,7 +87,7 @@ export function createBot(env: Env) {
 
     const userChannels = await db.getChannelsByOwner(ctx.from!.id);
     if (userChannels.length === 0) {
-      return ctx.reply('You do not have any connected channels yet. Add the bot to your channel first.');
+      return ctx.reply('You do not have any connected channels. Add the bot to your channel first.');
     }
 
     const primaryChannel = userChannels[0];
@@ -107,8 +122,9 @@ export function createBot(env: Env) {
       `User Report: ${targetUserId}`,
       `Current Name: ${member?.first_name || ''} ${member?.last_name || ''}`.trim(),
       `Current Username: @${member?.username || 'none'}`,
-      `Status: ${member?.status || 'unknown'}`,
+      `Status: ${member?.status || 'unknown'}${member?.is_deleted ? ' (Deleted Account)' : ''}`,
       `Linked Channel: ${member?.channel_link || 'Not linked'}`,
+      `Bio Link: ${member?.bio_link || 'None'}`,
       `Channel Title: ${member?.channel_title || 'N/A'}`,
       `Detection: ${member?.auto_detected ? 'Automatic' : 'Manual'}`,
       member?.joined_at ? `Joined: ${member.joined_at}` : '',
@@ -120,23 +136,28 @@ export function createBot(env: Env) {
       .filter((line) => line !== '')
       .join('\n');
 
-    await ctx.reply(message);
+    const keyboard = member?.channel_link && member.channel_link.startsWith('http')
+      ? new InlineKeyboard().url('Open Channel', member.channel_link)
+      : undefined;
+
+    await ctx.reply(message, { reply_markup: keyboard });
   });
 
   // Command: /left
   bot.command('left', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
 
-    const leftMembers = await db.getRecentLeftByOwner(ctx.from!.id, 15);
-    if (leftMembers.length === 0) {
+    const departures = await db.getRecentDeparturesByOwner(ctx.from!.id, 15);
+    if (departures.length === 0) {
       return ctx.reply('No recent departures recorded for your channels.');
     }
 
-    const lines = leftMembers.map((m, idx) => {
+    const lines = departures.map((m, idx) => {
       const name = `${m.first_name || ''} ${m.last_name || ''}`.trim() || 'Unknown';
       const username = m.username ? `@${m.username}` : 'no-username';
       const channel = m.channel_link || 'no-channel-linked';
-      return `${idx + 1}. ${name} (${username}) [ID: ${m.user_id}]\n   Channel: ${channel}\n   Left at: ${m.left_at}`;
+      const statusLabel = m.status === 'deleted_account' ? '[DELETED ACCOUNT]' : '[LEFT]';
+      return `${idx + 1}. ${name} (${username}) ${statusLabel} [ID: ${m.user_id}]\n   Channel: ${channel}\n   Time: ${m.left_at}`;
     });
 
     await ctx.reply(`Recent Departures:\n\n${lines.join('\n\n')}`);
@@ -161,7 +182,7 @@ export function createBot(env: Env) {
     await ctx.reply(`Active Tracked Members:\n\n${lines.join('\n\n')}`);
   });
 
-  // Bot added to a channel handler (multi-tenant registration)
+  // Bot added to a channel handler
   bot.on('my_chat_member', async (ctx) => {
     const update = ctx.myChatMember;
     const chat = update.chat;
@@ -177,7 +198,7 @@ export function createBot(env: Env) {
       try {
         await ctx.api.sendMessage(
           from.id,
-          `Channel Connected!\nTitle: ${channelTitle}\nID: ${chat.id}\n\nAll member joins and leaves will now be reported directly to you.`
+          `Channel Connected!\nTitle: ${channelTitle}\nID: ${chat.id}\n\nAll member joins, leaves, and deleted accounts will now be reported directly to you.`
         );
       } catch (err) {
         console.error('Failed to notify owner on channel addition:', err);
@@ -185,7 +206,7 @@ export function createBot(env: Env) {
     }
   });
 
-  // Channel member join/leave event handler
+  // Channel member status change handler
   bot.on('chat_member', async (ctx) => {
     const update = ctx.chatMember;
     const channelId = update.chat.id;
@@ -193,9 +214,12 @@ export function createBot(env: Env) {
     const newStatus = update.new_chat_member.status;
     const user = update.new_chat_member.user;
 
-    // Retrieve channel owner from D1
     const channelRecord = await db.getChannel(channelId);
     const ownerId = channelRecord?.owner_id;
+
+    const isDeletedAccount =
+      user.first_name === 'Deleted Account' ||
+      (user as any).is_deleted === true;
 
     const isJoin =
       (oldStatus === 'left' || oldStatus === 'kicked') &&
@@ -208,6 +232,7 @@ export function createBot(env: Env) {
     if (isJoin) {
       let channelLink: string | null = null;
       let channelTitle: string | null = null;
+      let bioLink: string | null = null;
       let bio: string | null = null;
       let autoDetected = false;
 
@@ -220,11 +245,16 @@ export function createBot(env: Env) {
           channelTitle = pc.title || null;
           channelLink = pc.username ? `https://t.me/${pc.username}` : `Channel ID: ${pc.id}`;
           autoDetected = true;
-        } else if (bio) {
+        }
+
+        if (bio) {
           const extracted = extractChannelFromBio(bio);
           if (extracted) {
-            channelLink = extracted.link;
-            autoDetected = true;
+            bioLink = extracted.link;
+            if (!channelLink) {
+              channelLink = extracted.link;
+              autoDetected = true;
+            }
           }
         }
       } catch (err) {
@@ -240,7 +270,9 @@ export function createBot(env: Env) {
         bio,
         channelLink,
         channelTitle,
+        bioLink,
         autoDetected,
+        isDeleted: isDeletedAccount,
         status: 'member',
       });
 
@@ -254,51 +286,70 @@ export function createBot(env: Env) {
           channelLink
             ? `Detected Channel: ${channelLink} (${autoDetected ? 'Auto-detected' : 'Manual'})`
             : 'Detected Channel: None found',
+          bioLink && bioLink !== channelLink ? `Bio Invite Link: ${bioLink}` : '',
           !channelLink ? `Link manually with: /pair ${user.id} <channel_link>` : '',
         ]
           .filter(Boolean)
           .join('\n');
 
+        const keyboard = channelLink && channelLink.startsWith('http')
+          ? new InlineKeyboard().url('Open Channel', channelLink)
+          : undefined;
+
         try {
-          await ctx.api.sendMessage(ownerId, lines);
+          await ctx.api.sendMessage(ownerId, lines, { reply_markup: keyboard });
         } catch (err) {
           console.error('Failed to send join notification to owner:', err);
         }
       }
-    } else if (isLeave) {
-      const oldRecord = await db.markLeft(
+    } else if (isLeave || isDeletedAccount) {
+      const oldRecord = await db.markLeftOrDeleted(
         channelId,
         user.id,
         user.first_name,
         user.last_name,
-        user.username
+        user.username,
+        isDeletedAccount
       );
       const history = await db.getProfileHistory(user.id);
 
       if (ownerId) {
-        const currentName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Unknown';
+        const currentName = isDeletedAccount
+          ? 'Deleted Account'
+          : `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Unknown';
+
         const pastNames = history
           .map((h) => `${h.first_name || ''} ${h.last_name || ''} (@${h.username || 'none'})`.trim())
           .filter((n, idx, arr) => arr.indexOf(n) === idx && n !== '')
           .slice(0, 3)
           .join(' -> ');
 
+        const alertTitle = isDeletedAccount
+          ? `ALERT: Account Deleted [${channelRecord?.title || 'Channel'}]`
+          : `ALERT: Member Left [${channelRecord?.title || 'Channel'}]`;
+
+        const targetChannel = oldRecord?.channel_link || oldRecord?.bio_link || 'No channel linked';
+
         const lines = [
-          `ALERT: Member Left [${channelRecord?.title || 'Channel'}]`,
+          alertTitle,
           `Current Name: ${currentName}`,
           `Current Username: @${user.username || 'none'}`,
           `User ID: ${user.id}`,
-          `Linked Channel: ${oldRecord?.channel_link || 'No channel linked'}`,
+          `Linked Channel: ${targetChannel}`,
           oldRecord?.channel_title ? `Channel Title: ${oldRecord.channel_title}` : '',
           pastNames ? `Known Names: ${pastNames}` : '',
         ]
           .filter(Boolean)
           .join('\n');
 
+        const keyboard = targetChannel.startsWith('http')
+          ? new InlineKeyboard().url('Leave / Open Channel', targetChannel)
+          : undefined;
+
         try {
-          await ctx.api.sendMessage(ownerId, lines);
+          await ctx.api.sendMessage(ownerId, lines, { reply_markup: keyboard });
         } catch (err) {
-          console.error('Failed to send leave notification to owner:', err);
+          console.error('Failed to send departure alert to owner:', err);
         }
       }
     }

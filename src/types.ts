@@ -1,7 +1,7 @@
 export interface Env {
   DB: D1Database;
   BOT_TOKEN: string;
-  ADMIN_ID?: string; // Optional super-admin
+  ADMIN_ID?: string;
   SECRET_TOKEN?: string;
 }
 
@@ -23,8 +23,10 @@ export interface MemberRecord {
   bio: string | null;
   channel_link: string | null;
   channel_title: string | null;
-  status: 'member' | 'left' | 'kicked';
+  bio_link: string | null;
+  status: 'member' | 'left' | 'kicked' | 'deleted_account';
   auto_detected: number;
+  is_deleted: number;
   joined_at: string;
   left_at: string | null;
   updated_at: string;
