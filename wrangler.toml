@@ -6,7 +6,7 @@ compatibility_date = "2024-09-23"
 [[d1_databases]]
 binding = "DB"
 database_name = "traitor-db"
-database_id = "your-d1-database-id" # Updated after running `wrangler d1 create traitor-db`
+database_id = "fd1787e8-7d85-4f15-8d2e-38bd29959883"
 
 [vars]
 ADMIN_ID = "96092687"
