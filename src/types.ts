@@ -1,8 +1,17 @@
+export type Language = 'fa' | 'en';
+
 export interface Env {
   DB: D1Database;
   BOT_TOKEN: string;
   ADMIN_ID?: string;
   SECRET_TOKEN?: string;
+}
+
+export interface UserRecord {
+  user_id: number;
+  language: Language;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ChannelRecord {

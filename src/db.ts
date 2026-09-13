@@ -1,7 +1,32 @@
-import { ChannelRecord, MemberRecord, ProfileHistoryRecord } from './types';
+import { ChannelRecord, Language, MemberRecord, ProfileHistoryRecord, UserRecord } from './types';
 
 export class MemberDatabase {
   constructor(private db: D1Database) {}
+
+  // User Language & Preferences
+  async getUserLanguage(userId: number): Promise<Language> {
+    const row = await this.db
+      .prepare('SELECT language FROM users WHERE user_id = ?')
+      .bind(userId)
+      .first<{ language: string }>();
+    if (row && (row.language === 'fa' || row.language === 'en')) {
+      return row.language as Language;
+    }
+    return 'fa';
+  }
+
+  async setUserLanguage(userId: number, language: Language): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO users (user_id, language, created_at, updated_at)
+         VALUES (?, ?, datetime('now'), datetime('now'))
+         ON CONFLICT(user_id) DO UPDATE SET
+           language = excluded.language,
+           updated_at = datetime('now')`
+      )
+      .bind(userId, language)
+      .run();
+  }
 
   // Channel Operations
   async registerChannel(
@@ -149,7 +174,6 @@ export class MemberDatabase {
       );
     }
 
-    // Preserve previously stored channel links if new one is not available
     const finalChannelLink = data.channelLink || existing.channel_link;
     const finalChannelTitle = data.channelTitle || existing.channel_title;
     const finalBioLink = data.bioLink || existing.bio_link;

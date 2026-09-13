@@ -1,3 +1,11 @@
+-- Users table: stores user preferences such as interface language
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    language TEXT DEFAULT 'fa',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Channels table: maps each channel to its owner
 CREATE TABLE IF NOT EXISTS channels (
     channel_id INTEGER PRIMARY KEY,
