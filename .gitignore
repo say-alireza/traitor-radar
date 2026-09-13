@@ -4,3 +4,5 @@ dist/
 .dev.vars
 .env
 *.log
+.telegram_session
+sync_import.sql
