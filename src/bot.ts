@@ -1,11 +1,10 @@
-import { Bot, Context } from 'grammy';
+import { Bot } from 'grammy';
 import { Env } from './types';
 import { MemberDatabase } from './db';
 
 function extractChannelFromBio(bio?: string): { link: string; type: string } | null {
   if (!bio) return null;
 
-  // Check for t.me link (public username or joinchat/invite)
   const linkMatch = bio.match(/(?:https?:\/\/)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_+]+)/i);
   if (linkMatch) {
     const raw = linkMatch[0];
@@ -13,7 +12,6 @@ function extractChannelFromBio(bio?: string): { link: string; type: string } | n
     return { link: fullLink, type: 'bio_link' };
   }
 
-  // Check for @channel tag in bio
   const atMatch = bio.match(/@([a-zA-Z0-9_]{4,})/);
   if (atMatch) {
     return { link: `https://t.me/${atMatch[1]}`, type: 'bio_handle' };
@@ -25,32 +23,41 @@ function extractChannelFromBio(bio?: string): { link: string; type: string } | n
 export function createBot(env: Env) {
   const bot = new Bot(env.BOT_TOKEN);
   const db = new MemberDatabase(env.DB);
-  const adminId = parseInt(env.ADMIN_ID || '0', 10);
-
-  // Middleware: restrict command execution to admin
-  const adminOnly = (ctx: Context, next: () => Promise<void>) => {
-    if (adminId && ctx.from?.id !== adminId) {
-      return ctx.reply('Access denied.');
-    }
-    return next();
-  };
 
   // Command: /start
-  bot.command('start', adminOnly, async (ctx) => {
+  bot.command('start', async (ctx) => {
+    if (ctx.chat.type !== 'private') return;
+
+    const userChannels = await db.getChannelsByOwner(ctx.from!.id);
+    const channelList = userChannels.length
+      ? userChannels.map((c) => `- ${c.title || 'Untitled'} (ID: ${c.channel_id})`).join('\n')
+      : '- No channels connected yet.';
+
     const text = [
       'Traitor Radar is active.',
       '',
-      'Available commands:',
-      '/pair <user_id> <channel_link> - Link a channel to a user ID',
-      '/info <user_id> - View detailed user history and linked channel',
-      '/left - List recent members who left',
-      '/list - List active members',
+      'How to use:',
+      '1. Add this bot as an Administrator to your Telegram channel.',
+      '2. The bot will automatically link your channel to your account.',
+      '3. You will receive instant alerts when someone joins or leaves.',
+      '',
+      'Your Connected Channels:',
+      channelList,
+      '',
+      'Commands:',
+      '/pair <user_id> <channel_link> - Manually link a channel to a user ID',
+      '/info <user_id> - View detailed user history',
+      '/left - List recent members who left your channels',
+      '/list - List active members in your channels',
     ].join('\n');
+
     await ctx.reply(text);
   });
 
   // Command: /pair <user_id> <channel_link>
-  bot.command('pair', adminOnly, async (ctx) => {
+  bot.command('pair', async (ctx) => {
+    if (ctx.chat.type !== 'private') return;
+
     const parts = (ctx.match || '').trim().split(/\s+/);
     if (parts.length < 2) {
       return ctx.reply('Usage: /pair <user_id> <channel_link>');
@@ -63,12 +70,20 @@ export function createBot(env: Env) {
       return ctx.reply('Invalid user ID.');
     }
 
-    await db.setManualChannel(targetUserId, channelLink);
+    const userChannels = await db.getChannelsByOwner(ctx.from!.id);
+    if (userChannels.length === 0) {
+      return ctx.reply('You do not have any connected channels yet. Add the bot to your channel first.');
+    }
+
+    const primaryChannel = userChannels[0];
+    await db.setManualChannel(primaryChannel.channel_id, targetUserId, channelLink);
     await ctx.reply(`Channel linked successfully for User ID ${targetUserId}:\n${channelLink}`);
   });
 
   // Command: /info <user_id>
-  bot.command('info', adminOnly, async (ctx) => {
+  bot.command('info', async (ctx) => {
+    if (ctx.chat.type !== 'private') return;
+
     const query = (ctx.match || '').trim();
     const targetUserId = parseInt(query, 10);
 
@@ -76,26 +91,28 @@ export function createBot(env: Env) {
       return ctx.reply('Usage: /info <user_id>');
     }
 
-    const member = await db.getMember(targetUserId);
-    if (!member) {
+    const records = await db.getMemberAcrossChannels(targetUserId);
+    const history = await db.getProfileHistory(targetUserId);
+
+    if (records.length === 0 && history.length === 0) {
       return ctx.reply(`No records found for User ID ${targetUserId}.`);
     }
 
-    const history = await db.getProfileHistory(targetUserId);
+    const member = records[0];
     const historyLines = history
       .map((h) => `- ${h.first_name || ''} ${h.last_name || ''} (@${h.username || 'none'}) [${h.recorded_at}]`)
       .join('\n');
 
     const message = [
-      `User Report: ${member.user_id}`,
-      `Current Name: ${member.first_name || ''} ${member.last_name || ''}`.trim(),
-      `Current Username: @${member.username || 'none'}`,
-      `Status: ${member.status}`,
-      `Linked Channel: ${member.channel_link || 'Not linked'}`,
-      `Channel Title: ${member.channel_title || 'N/A'}`,
-      `Detection Method: ${member.auto_detected ? 'Automatic' : 'Manual'}`,
-      `Joined: ${member.joined_at}`,
-      member.left_at ? `Left: ${member.left_at}` : '',
+      `User Report: ${targetUserId}`,
+      `Current Name: ${member?.first_name || ''} ${member?.last_name || ''}`.trim(),
+      `Current Username: @${member?.username || 'none'}`,
+      `Status: ${member?.status || 'unknown'}`,
+      `Linked Channel: ${member?.channel_link || 'Not linked'}`,
+      `Channel Title: ${member?.channel_title || 'N/A'}`,
+      `Detection: ${member?.auto_detected ? 'Automatic' : 'Manual'}`,
+      member?.joined_at ? `Joined: ${member.joined_at}` : '',
+      member?.left_at ? `Left: ${member.left_at}` : '',
       '',
       'Recorded Name History:',
       historyLines || '- No past records',
@@ -107,10 +124,12 @@ export function createBot(env: Env) {
   });
 
   // Command: /left
-  bot.command('left', adminOnly, async (ctx) => {
-    const leftMembers = await db.getRecentLeft(15);
+  bot.command('left', async (ctx) => {
+    if (ctx.chat.type !== 'private') return;
+
+    const leftMembers = await db.getRecentLeftByOwner(ctx.from!.id, 15);
     if (leftMembers.length === 0) {
-      return ctx.reply('No recent departures recorded.');
+      return ctx.reply('No recent departures recorded for your channels.');
     }
 
     const lines = leftMembers.map((m, idx) => {
@@ -124,10 +143,12 @@ export function createBot(env: Env) {
   });
 
   // Command: /list
-  bot.command('list', adminOnly, async (ctx) => {
-    const active = await db.getActiveMembers(25);
+  bot.command('list', async (ctx) => {
+    if (ctx.chat.type !== 'private') return;
+
+    const active = await db.getActiveMembersByOwner(ctx.from!.id, 25);
     if (active.length === 0) {
-      return ctx.reply('No active tracked members in database.');
+      return ctx.reply('No active tracked members in your channels.');
     }
 
     const lines = active.map((m, idx) => {
@@ -140,12 +161,41 @@ export function createBot(env: Env) {
     await ctx.reply(`Active Tracked Members:\n\n${lines.join('\n\n')}`);
   });
 
-  // Chat member status change handler
+  // Bot added to a channel handler (multi-tenant registration)
+  bot.on('my_chat_member', async (ctx) => {
+    const update = ctx.myChatMember;
+    const chat = update.chat;
+    const from = update.from;
+    const newStatus = update.new_chat_member.status;
+
+    if (chat.type === 'channel' && (newStatus === 'administrator' || newStatus === 'creator')) {
+      const channelTitle = chat.title || 'Untitled Channel';
+      const channelUsername = chat.username || null;
+
+      await db.registerChannel(chat.id, from.id, channelTitle, channelUsername);
+
+      try {
+        await ctx.api.sendMessage(
+          from.id,
+          `Channel Connected!\nTitle: ${channelTitle}\nID: ${chat.id}\n\nAll member joins and leaves will now be reported directly to you.`
+        );
+      } catch (err) {
+        console.error('Failed to notify owner on channel addition:', err);
+      }
+    }
+  });
+
+  // Channel member join/leave event handler
   bot.on('chat_member', async (ctx) => {
     const update = ctx.chatMember;
+    const channelId = update.chat.id;
     const oldStatus = update.old_chat_member.status;
     const newStatus = update.new_chat_member.status;
     const user = update.new_chat_member.user;
+
+    // Retrieve channel owner from D1
+    const channelRecord = await db.getChannel(channelId);
+    const ownerId = channelRecord?.owner_id;
 
     const isJoin =
       (oldStatus === 'left' || oldStatus === 'kicked') &&
@@ -162,11 +212,9 @@ export function createBot(env: Env) {
       let autoDetected = false;
 
       try {
-        // Fetch full profile info from Telegram API
         const fullChat = await ctx.api.getChat(user.id);
         bio = 'bio' in fullChat && typeof fullChat.bio === 'string' ? fullChat.bio : null;
 
-        // Check for attached personal_chat (Telegram native feature)
         if ('personal_chat' in fullChat && fullChat.personal_chat) {
           const pc = fullChat.personal_chat as { id: number; title?: string; username?: string };
           channelTitle = pc.title || null;
@@ -184,6 +232,7 @@ export function createBot(env: Env) {
       }
 
       await db.saveOrUpdateMember({
+        channelId,
         userId: user.id,
         firstName: user.first_name || null,
         lastName: user.last_name || null,
@@ -195,10 +244,10 @@ export function createBot(env: Env) {
         status: 'member',
       });
 
-      if (adminId) {
+      if (ownerId) {
         const name = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Unknown';
         const lines = [
-          'Member Joined:',
+          `Member Joined [${channelRecord?.title || 'Channel'}]:`,
           `Name: ${name}`,
           `Username: @${user.username || 'none'}`,
           `User ID: ${user.id}`,
@@ -211,16 +260,22 @@ export function createBot(env: Env) {
           .join('\n');
 
         try {
-          await ctx.api.sendMessage(adminId, lines);
+          await ctx.api.sendMessage(ownerId, lines);
         } catch (err) {
-          console.error('Failed to send admin notification:', err);
+          console.error('Failed to send join notification to owner:', err);
         }
       }
     } else if (isLeave) {
-      const oldRecord = await db.markLeft(user.id, user.first_name, user.last_name, user.username);
+      const oldRecord = await db.markLeft(
+        channelId,
+        user.id,
+        user.first_name,
+        user.last_name,
+        user.username
+      );
       const history = await db.getProfileHistory(user.id);
 
-      if (adminId) {
+      if (ownerId) {
         const currentName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Unknown';
         const pastNames = history
           .map((h) => `${h.first_name || ''} ${h.last_name || ''} (@${h.username || 'none'})`.trim())
@@ -229,7 +284,7 @@ export function createBot(env: Env) {
           .join(' -> ');
 
         const lines = [
-          'ALERT: Member Left Channel',
+          `ALERT: Member Left [${channelRecord?.title || 'Channel'}]`,
           `Current Name: ${currentName}`,
           `Current Username: @${user.username || 'none'}`,
           `User ID: ${user.id}`,
@@ -241,9 +296,9 @@ export function createBot(env: Env) {
           .join('\n');
 
         try {
-          await ctx.api.sendMessage(adminId, lines);
+          await ctx.api.sendMessage(ownerId, lines);
         } catch (err) {
-          console.error('Failed to send admin notification:', err);
+          console.error('Failed to send leave notification to owner:', err);
         }
       }
     }
